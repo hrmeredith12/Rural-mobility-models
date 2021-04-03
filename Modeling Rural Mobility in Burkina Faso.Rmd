@@ -1,0 +1,687 @@
+---
+output: 
+  html_notebook:
+      df_print: paged
+---
+
+### Characterizing and modeling mobility patterns in Burkina Faso
+
+Prepared by Hannah Meredith
+Updated `r Sys.Date()`
+
+```{r setup, include = FALSE}
+require(ggplot2)
+require(dplyr)
+require(ggridges)
+require(RColorBrewer)
+require(scales)
+require(mobility)
+require(tidyr)
+require(DescTools)
+
+source("MobilityFunctions.R")
+```
+
+
+
+This notebook accompanies the study "" by X et al. It uses jittered daily mobile phone data from Burkina Faso that has been aggregated to monthly level to characterize travel between administrative 2 units. This notebook will characterize mobility patterns observed in the mobile phone data, fit gravity and radiation models to that data, and generate plots used to analyze how well mobility models can capture the trends observed in the mobile phone data. 
+
+This Rmd uses "BFO_adm2_monthly_trips_details.RData", which is available at XXX
+This Rmd calls a function file "MobilityFunctions.R"
+
+```{r data-load, cache=TRUE, include=FALSE}
+## Load the dataset with trip counts and details
+load("../Data/BFO_adm2_monthly_trips_and_grav_rad_models.RData")
+
+adm2.trip.month.summary$adm2.single.trip.avg[adm2.trip.month.summary$start.adm2.code==adm2.trip.month.summary$end.adm2.code] <- 0 
+
+```
+
+
+```{r data-wrangle, cache=TRUE, include=FALSE}
+## create variables to pass to models
+districts <- unique(adm2.trip.month.summary$start.adm2.code)
+districts <- districts[order(districts)]
+
+rank.Id <- as.integer(seq(1,length(unique(districts))))
+rank.Id <- cbind.data.frame(rank.Id,as.integer(districts))
+colnames(rank.Id) <- c("ID", "adm2.code")
+
+population <- unique(adm2.trip.month.summary[ ,c("start.adm2.code", "pop.start")])
+N <- as.vector(t(population$pop.start))
+names(N) <- districts
+
+## Variables in wide/matrix form
+distance <- make.OD.matrix(adm2.trip.month.summary, "start.adm2.code", "end.adm2.code","distance", districts) 
+monthly.trips <- make.OD.matrix(adm2.trip.month.summary, "start.adm2.code", "end.adm2.code", "adm2.single.trip.avg", districts) 
+urban.trip.type <- make.OD.matrix(adm2.trip.month.summary, "start.adm2.code", "end.adm2.code", "urban.trip.type", districts)
+regional.trip.type <- make.OD.matrix(adm2.trip.month.summary, "start.adm2.code", "end.adm2.code", "regional.trip.type", districts)
+regional.urban.trip.type <- make.OD.matrix(adm2.trip.month.summary, "start.adm2.code", "end.adm2.code", "regional.urban.trip.type", districts)
+s_ij <- make.OD.matrix(adm2.trip.month.summary, "start.adm2.code", "end.adm2.code","s_ij", districts) 
+
+# urban.trip.type <- make.OD.matrix(adm2.trip.month.summary, "start.adm2.code", "end.adm2.code", "trip.type", districts) 
+# regional.trip.type <- make.OD.matrix(adm2.trip.month.summary, "start.adm2.code", "end.adm2.code", "in.out", districts)
+# regional.urban.trip.type <- make.OD.matrix(adm2.trip.month.summary, "start.adm2.code", "end.adm2.code", "in.out.TT", districts)
+# ## Variables in long form
+# distance.long <-adm2.trip.month.summary[ , c("start.adm2.code", "end.adm2.code","distance")]
+# monthly.trips.long <- adm2.trip.month.summary[ , c("start.adm2.code", "end.adm2.code", "adm2.single.trip.avg")]
+# urban.trip.type.long <- adm2.trip.month.summary[ , c("start.adm2.code", "end.adm2.code", "urban.trip.type")]
+# regional.trip.type.long <- adm2.trip.month.summary[ , c("start.adm2.code", "end.adm2.code", "regional.trip.type")]
+# regional.urban.trip.type.long <-adm2.trip.month.summary[ , c("start.adm2.code", "end.adm2.code", "regional.urban.trip.type")]
+
+```
+
+```{r fit-models, cache=TRUE, include=FALSE}
+
+### Common parameters for all runs: 
+  n_chain = 4
+  n_burn = 40 #For testing, increase to 4000 for full run
+  n_samp = 100 #For testing, increase to 10000 for full run
+  n_thin = 5
+  prior = NULL
+  DIC = TRUE
+  parallel = TRUE
+
+
+### Basic Gravity model - power distance kernel
+  basic.grav.model.pwr <- fit.basic.gravity.model.pwr(M = monthly.trips,
+                                                      D = distance,
+                                                      N = N,
+                                                      n_chain = n_chain,
+                                                      n_burn = n_burn,
+                                                      n_samp = n_samp,
+                                                      n_thin = n_thin,
+                                                      prior = NULL,
+                                                      DIC = TRUE,
+                                                      parallel = TRUE)
+
+### Basic Gravity model - exponential distance kernel
+  basic.grav.model.exp <- fit.basic.gravity.model.exp(M = monthly.trips,
+                                                      D = distance,
+                                                      N = N,
+                                                      n_chain = n_chain,
+                                                      n_burn = n_burn,
+                                                      n_samp = n_samp,
+                                                      n_thin = n_thin,
+                                                      prior = NULL,
+                                                      DIC = TRUE,
+                                                      parallel = TRUE)
+
+ ### Regional Gravity model - power distance kernel
+  regional.grav.model.pwr <- fit.regional.gravity.model.pwr(M = monthly.trips,
+                                                      D = distance,
+                                                      TT = regional.trip.type, 
+                                                      N = N,
+                                                      n_chain = n_chain,
+                                                      n_burn = n_burn,
+                                                      n_samp = n_samp,
+                                                      n_thin = n_thin,
+                                                      prior = NULL,
+                                                      DIC = TRUE,
+                                                      parallel = TRUE)
+  
+   ### Regional Gravity model - exponential distance kernel
+  regional.grav.model.exp <- fit.regional.gravity.model.exp(M = monthly.trips,
+                                                      D = distance,
+                                                      TT = regional.trip.type, 
+                                                      N = N,
+                                                      n_chain = n_chain,
+                                                      n_burn = n_burn,
+                                                      n_samp = n_samp,
+                                                      n_thin = n_thin,
+                                                      prior = NULL,
+                                                      DIC = TRUE,
+                                                      parallel = TRUE)
+  
+   ### Urbanicity Gravity model - power distance kernel
+ urban.grav.model.pwr <- fit.urban.gravity.model.pwr(M = monthly.trips,
+                                                      D = distance,
+                                                      TT = urban.trip.type, 
+                                                      N = N,
+                                                      n_chain = n_chain,
+                                                      n_burn = n_burn,
+                                                      n_samp = n_samp,
+                                                      n_thin = n_thin,
+                                                      prior = NULL,
+                                                      DIC = TRUE,
+                                                      parallel = TRUE)
+  
+   ### Urbanicity Gravity model - exponential distance kernel
+  urban.grav.model.exp <- fit.urban.gravity.model.exp(M = monthly.trips,
+                                                      D = distance,
+                                                      TT = urban.trip.type, 
+                                                      N = N,
+                                                      n_chain = n_chain,
+                                                      n_burn = n_burn,
+                                                      n_samp = n_samp,
+                                                      n_thin = n_thin,
+                                                      prior = NULL,
+                                                      DIC = TRUE,
+                                                      parallel = TRUE)
+  
+ 
+  ### Regional Urbanicity Gravity model - power distance kernel
+  reg.urb.grav.model.pwr <- fit.reg.urb.gravity.model.pwr(M = monthly.trips,
+                                                      D = distance,
+                                                      TT = regional.urban.trip.type, 
+                                                      N = N,
+                                                      n_chain = n_chain,
+                                                      n_burn = n_burn,
+                                                      n_samp = n_samp,
+                                                      n_thin = n_thin,
+                                                      prior = NULL,
+                                                      DIC = TRUE,
+                                                      parallel = TRUE)
+  
+  ### Regional Urbanicity Gravity model - exponential distance kernel
+  reg.urb.grav.model.exp <- fit.reg.urb.gravity.model.exp(M = monthly.trips,
+                                                      D = distance,
+                                                      TT = regional.urban.trip.type, 
+                                                      N = N,
+                                                      n_chain = n_chain,
+                                                      n_burn = n_burn,
+                                                      n_samp = n_samp,
+                                                      n_thin = n_thin,
+                                                      prior = NULL,
+                                                      DIC = TRUE,
+                                                      parallel = TRUE)
+  
+  ### Radiation Model
+  radiation.model <- fit.radiation.model(M = monthly.trips,
+                                         s_ij = s_ij,
+                                         m_tot = unique(adm2.trip.month.summary$m_tot),  
+                                         N = N,
+                                         n_chain = n_chain,
+                                         n_burn = n_burn,
+                                         n_samp = n_samp,
+                                         n_thin = n_thin,
+                                         prior = NULL,
+                                         DIC = TRUE,
+                                         parallel = TRUE)
+
+
+```
+
+```{r compile-model-estimates, cache=TRUE, include=FALSE}
+## Generate the trip counts based on each model type and fitted parameters
+
+M.predicted.basic.pwr <- sim.basic.gravity(dist.fx = "pwr",
+                                           M.observed = monthly.trips,
+                                           N=population$pop.start,
+                                           D=distance,
+                                           theta=basic.grav.model.pwr['theta', 'Mean'],
+                                           omega.1=basic.grav.model.pwr['omega_1', 'Mean'],
+                                           omega.2=basic.grav.model.pwr['omega_2', 'Mean'],
+                                           gam = basic.grav.model.pwr[rownames(basic.grav.model.pwr) %like% 'gamma', 'Mean'],
+                                           model = 'BasicModel-pwr',
+                                           district.ID = districts,
+                                           district.label = rank.Id, # could change out if different from district #
+                                           counts=TRUE)
+
+M.predicted.basic.exp <- sim.basic.gravity(dist.fx = "exp",
+                                           M.observed = monthly.trips,
+                                           N=population$pop.start,
+                                           D=distance,
+                                           theta=basic.grav.model.exp['theta', 'Mean'],
+                                           omega.1=basic.grav.model.exp['omega_1', 'Mean'],
+                                           omega.2=basic.grav.model.exp['omega_2', 'Mean'],
+                                           gam = basic.grav.model.exp[rownames(basic.grav.model.exp) %like% 'gamma', 'Mean'],
+                                           model = 'BasicModel-exp',
+                                           district.ID = districts,
+                                           district.label = rank.Id,
+                                           counts=TRUE)
+
+
+M.predicted.urb.pwr <- sim.trip.type.gravity(dist.fx = "pwr",
+                                             M.observed = monthly.trips,
+                                             N=population$pop.start,
+                                             D=distance,
+                                             TT = urban.trip.type,
+                                             theta = urban.grav.model.pwr['theta', 'Mean'],
+                                             omega.1 = urban.grav.model.pwr[grep("^omega_1", row.names(urban.grav.model.pwr)), "Mean"], 
+                                             omega.2 = urban.grav.model.pwr[grep("^omega_2", row.names(urban.grav.model.pwr)), "Mean"],
+                                             gam = urban.grav.model.pwr[grep("^gamma", row.names(urban.grav.model.pwr)), "Mean"],
+                                             model = 'UrbanicityModel-pwr',
+                                             district.ID = districts,
+                                             district.label = rank.Id,
+                                             counts = TRUE)
+
+M.predicted.urb.exp <- sim.trip.type.gravity(dist.fx = "exp",
+                                             M.observed = monthly.trips,
+                                             N=population$pop.start,
+                                             D=distance,
+                                             TT = urban.trip.type,
+                                             theta = urban.grav.model.exp['theta', 'Mean'],
+                                             omega.1 = urban.grav.model.exp[grep("^omega_1", row.names(urban.grav.model.exp)), "Mean"], 
+                                             omega.2 = urban.grav.model.exp[grep("^omega_2", row.names(urban.grav.model.exp)), "Mean"],
+                                             gam = urban.grav.model.exp[grep("^gamma", row.names(urban.grav.model.exp)), "Mean"],
+                                             model = 'UrbanicityModel-exp',
+                                             district.ID = districts,
+                                             district.label = rank.Id,
+                                             counts = TRUE)
+
+M.predicted.reg.pwr <- sim.trip.type.gravity(dist.fx = "pwr",
+                                             M.observed = monthly.trips,
+                                             N=population$pop.start,
+                                             D=distance,
+                                             TT = regional.trip.type,
+                                             theta = regional.grav.model.pwr['theta', 'Mean'],
+                                             omega.1 = regional.grav.model.pwr[grep("^omega_1", row.names(regional.grav.model.pwr)), "Mean"], 
+                                             omega.2 = regional.grav.model.pwr[grep("^omega_2", row.names(regional.grav.model.pwr)), "Mean"],
+                                             gam = regional.grav.model.pwr[grep("^gamma", row.names(regional.grav.model.pwr)), "Mean"],
+                                             model = 'RegionalModel-pwr',
+                                             district.ID = districts,
+                                             district.label = rank.Id,
+                                             counts = TRUE)
+
+M.predicted.reg.exp <- sim.trip.type.gravity(dist.fx = "exp",
+                                             M.observed = monthly.trips,
+                                             N=population$pop.start,
+                                             D=distance,
+                                             TT = regional.trip.type,
+                                             theta = regional.grav.model.exp['theta', 'Mean'],
+                                             omega.1 = regional.grav.model.exp[grep("^omega_1", row.names(regional.grav.model.exp)), "Mean"], 
+                                             omega.2 = regional.grav.model.exp[grep("^omega_2", row.names(regional.grav.model.exp)), "Mean"],
+                                             gam = regional.grav.model.exp[grep("^gamma", row.names(regional.grav.model.exp)), "Mean"],
+                                             model = 'RegionalModel-exp',
+                                             district.ID = districts,
+                                             district.label = rank.Id,
+                                             counts = TRUE)
+
+M.predicted.urb.reg.pwr <- sim.trip.type.gravity(dist.fx = "pwr",
+                                                 M.observed = monthly.trips,
+                                                 N=population$pop.start,
+                                                 D=distance,
+                                                 TT = regional.urban.trip.type,
+                                                 theta = reg.urb.grav.model.pwr['theta', 'Mean'],
+                                                 omega.1 = reg.urb.grav.model.pwr[grep("^omega_1", row.names(reg.urb.grav.model.pwr)), "Mean"], 
+                                                 omega.2 = reg.urb.grav.model.pwr[grep("^omega_2", row.names(reg.urb.grav.model.pwr)), "Mean"],
+                                                 gam = reg.urb.grav.model.pwr[grep("^gamma", row.names(reg.urb.grav.model.pwr)), "Mean"],
+                                                 model = 'RegionalUrbanicityModel-pwr',
+                                                 district.ID = districts,
+                                                 district.label = rank.Id,
+                                                 counts = TRUE)
+
+M.predicted.urb.reg.exp <- sim.trip.type.gravity(dist.fx = "exp",
+                                                 M.observed = monthly.trips,
+                                                 N=population$pop.start,
+                                                 D=distance,
+                                                 TT = regional.urban.trip.type,
+                                                 theta = reg.urb.grav.model.exp['theta', 'Mean'],
+                                                 omega.1 = reg.urb.grav.model.exp[grep("^omega_1", row.names(reg.urb.grav.model.exp)), "Mean"], 
+                                                 omega.2 = reg.urb.grav.model.exp[grep("^omega_2", row.names(reg.urb.grav.model.exp)), "Mean"],
+                                                 gam = reg.urb.grav.model.exp[grep("^gamma", row.names(reg.urb.grav.model.exp)), "Mean"],
+                                                 model = 'RegionalUrbanicityModel-exp',
+                                                 district.ID = districts,
+                                                 district.label = rank.Id,
+                                                 counts = TRUE)
+
+M.predicted.rad <- sim.rad.mod(M.observed = monthly.trips,
+                               N=population$pop.start,
+                               s_ij = s_ij,
+                               theta = radiation.model['theta', 'Mean'],
+                               m_tot = unique(adm2.trip.month.summary$m_tot),
+                               model = 'RadiationModel',
+                               district.ID = districts,
+                               district.label = rank.Id,
+                               counts = TRUE)
+
+## Join all of the model estimates into one dataframe for plotting
+
+all.model.estimates <- rbind(M.predicted.basic.pwr, M.predicted.basic.exp,
+                             M.predicted.reg.pwr, M.predicted.reg.exp,
+                             M.predicted.urb.pwr, M.predicted.urb.exp, 
+                             M.predicted.urb.reg.pwr, M.predicted.urb.reg.exp, M.predicted.rad)
+
+all.model.estimates <- all.model.estimates %>% separate(model.x, c("adjusted.model", "dist.fx"), sep = "-")
+
+all.model.estimates$adjusted.model <- factor(all.model.estimates$adjusted.model,
+                                 levels = c("BasicModel", "UrbanicityModel", "RegionalModel", "RegionalUrbanicityModel","RadiationModel"),
+                                 labels = c("Basic Model", "Urbanicity Model", "Regional Model", "Regional-Urbanicity Model"      , "Radiation Model"))
+
+names(all.model.estimates)[names(all.model.estimates) == "model.y"] <- "observed"
+
+## Add in trip details and define factors
+all.model.estimates <- left_join(all.model.estimates, adm2.trip.month.summary[,c("start.adm1.code","start.adm2.code", "end.adm1.code", "end.adm2.code", "distance", "pop.start", "pop.end", "urban.trip.type", "regional.trip.type", "regional.urban.trip.type")], by = c("origin" = "start.adm2.code", "destination" = "end.adm2.code"))
+
+# all.model.estimates <- left_join(all.model.estimates, adm2.trip.month.summary[,c("start.adm1.code","start.adm2.code", "end.adm1.code", "end.adm2.code", "distance", "pop.start", "pop.end", "trip.type", "in.out", "in.out.TT")], by = c("origin" = "start.adm2.code", "destination" = "end.adm2.code"))
+
+
+all.model.estimates$urban.trip.type <- factor(all.model.estimates$urban.trip.type,
+                                              levels = c(0, 1, 2, 3, 4),
+                                              labels = c("stay", "Rural - Rural", "Rural - Urban", "Urban - Rural", "Urban - Urban"))
+all.model.estimates$regional.urban.trip.type <- factor(all.model.estimates$regional.urban.trip.type,
+                                                       levels = c(0, 1, 2, 3, 4, 5, 6, 7,8),
+                                                       labels = c("stay", "Intra:R-R", "Inter:R-R", "Intra:R-U", "Inter:R-U",
+                                                                  "Intra:U-R","Inter:U-R", "Intra:U-U", "Inter:U-U"))
+all.model.estimates$regional.trip.type <- factor(all.model.estimates$regional.trip.type,
+                                                 levels = c(0, 1, 2),
+                                                 labels = c("stay", "Intra-regional", "Inter-regional"))
+all.model.estimates$ratio.bin2 <- cut(all.model.estimates$over.under.est.ratio,
+                          breaks = c(-Inf, 1/2, 2, Inf ),
+                          labels = c("under", "0.5 : 2", "over"))
+
+```
+
+```{r OD-matrix-prep, cache=TRUE, include=FALSE}
+### Model estimates
+# sum trips between origin/destination
+adm2.trip.month <- all.model.estimates %>%    
+     group_by(origin, destination, adjusted.model, dist.fx) %>%
+     mutate(adm2.single.trip.sum = sum(Trips.pred, na.rm = TRUE)) %>%
+     distinct(origin, destination, adjusted.model, dist.fx, .keep_all=TRUE) 
+
+# sum all trips departing from each origin
+adm2.trip.month <- adm2.trip.month %>%    
+     group_by(origin, adjusted.model, dist.fx) %>%
+     mutate(adm2.all.trip.sum = sum(adm2.single.trip.sum, na.rm = TRUE)) 
+
+# proportion of total trips made from each origin
+adm2.trip.month$adm2.single.trip.prop <- adm2.trip.month$adm2.single.trip.sum/adm2.trip.month$adm2.all.trip.sum  
+
+# Bin frequencies for visualization in OD matrix
+adm2.trip.month$trip.freq.col <- cut(adm2.trip.month$adm2.single.trip.prop,
+                                     breaks = c(-Inf, 0.001, 0.01, 0.1, Inf),
+                                     labels = c("< 0.001", "0.001 : 0.01", "0.01 : 0.1", "0.1 : 1"))
+
+## CDR trips
+adm2.trip.month.obs <- all.model.estimates %>%                                           
+     group_by(origin, destination, adjusted.model, dist.fx) %>%
+     mutate(adm2.single.trip.sum = sum(Trips.obs, na.rm = TRUE)) %>%
+     distinct(origin, destination, adjusted.model, .keep_all=TRUE) 
+
+adm2.trip.month.obs <- adm2.trip.month.obs %>%                                           
+     group_by(origin, adjusted.model, dist.fx) %>%
+     mutate(adm2.all.trip.sum = sum(adm2.single.trip.sum, na.rm = TRUE)) 
+
+adm2.trip.month.obs$adm2.single.trip.prop <- adm2.trip.month.obs$adm2.single.trip.sum/adm2.trip.month.obs$adm2.all.trip.sum  
+
+
+adm2.trip.month.obs$trip.freq.col <- cut(adm2.trip.month.obs$adm2.single.trip.prop,
+                                     breaks = c(-Inf, 0.001, 0.01, 0.1, Inf),
+                                     labels = c("< 0.001", "0.001 : 0.01", "0.01 : 0.1", "0.1 : 1"))
+
+## Join observed and modeled trip counts for plotting
+tmp.1 <- adm2.trip.month
+all <- tmp.1[, colnames(tmp.1) %in% c("origin.idx", "destination.idx", "adjusted.model", "dist.fx", "trip.freq.col")]
+tmp.2 <- subset(adm2.trip.month.obs, adjusted.model == "Basic Model" & dist.fx == "pwr")
+obs <- tmp.2[, colnames(tmp.2) %in% c("origin.idx", "destination.idx", "observed", "dist.fx", "trip.freq.col")]
+
+names(all)[names(all) == 'adjusted.model'] <- 'model'
+names(obs)[names(obs) == 'observed'] <- 'model'
+
+all.obs <- rbind.data.frame(all, obs)
+all.obs$model <- factor(all.obs$model, 
+                        levels = c("Radiation Model", "Observed", "Basic Model", "Regional Model",              
+                                   "Urbanicity Model", "Regional-Urbanicity Model"          
+                        ))
+all.obs$dist.fx <- factor(all.obs$dist.fx,
+                          levels = c("pwr", "exp"),
+                          labels = c("power", "exponential"))
+```
+
+```{r OD-matrix-plot}
+
+ggplot(subset(all.obs, !model %in% c("Radiation Model", "Observed")), aes(destination.idx, origin.idx)) +
+  geom_tile(aes(fill = trip.freq.col))+
+  scale_fill_manual(values = brewer.pal(n = nlevels(adm2.trip.month$trip.freq.col), name = "Blues"))+
+  xlab("Destination") +
+  ylab("Origin") +
+  guides(fill = guide_legend(title = "Trip proportion"))+
+  facet_grid(dist.fx~model)+
+  theme(plot.title = element_text(size = 16, hjust = 0.5),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.line = element_blank(),
+        axis.text=element_text(size=16),
+        axis.title=element_text(size=16),
+        legend.text=element_text(size = 14),
+        legend.title = element_text(size = 14),
+        legend.position = "bottom",
+        strip.background = element_blank(),
+        strip.text = element_text(size = 16))
+
+ggplot(subset(all.obs, model %in% c("Radiation Model", "Observed")), aes(destination.idx, origin.idx)) +
+     geom_tile(aes(fill = trip.freq.col))+
+     scale_fill_manual(values = brewer.pal(n = nlevels(adm2.trip.month$trip.freq.col), name = "Blues"))+
+     xlab("Destination") +
+     ylab("Origin") +
+     guides(fill = guide_legend(title = "Trip proportion"))+
+     facet_wrap(~model, nrow = 1)+
+     theme(plot.title = element_text(size = 16, hjust = 0.5),
+           panel.grid.major = element_blank(),
+           panel.grid.minor = element_blank(),
+           panel.background = element_blank(),
+           axis.line = element_blank(),
+           axis.text=element_text(size=16),
+           axis.title=element_text(size=16),
+           legend.text=element_text(size = 14),
+           legend.title = element_text(size = 14),
+           legend.position = "bottom",
+           strip.background = element_blank(),
+           strip.text = element_text(size = 16))
+
+
+```
+
+```{r trips-vs-distance-population-prep, cache=TRUE, include=FALSE}
+
+tmp.1 <- subset(adm2.trip.month, adjusted.model == "Basic Model" & dist.fx == "pwr")
+basic <- tmp.1[ , !colnames(tmp.1) %in% c("Trips.obs", "observed")]#[-7:-17]
+tmp.2 <- subset(adm2.trip.month.obs, adjusted.model == "Basic Model" & dist.fx == "pwr")
+obs <- tmp.2[ , !colnames(tmp.2) %in% c("Trips.pred", "adjusted.model")]#[-7:-17]
+
+names(basic)[names(basic) == 'Trips.pred'] <- 'Trips'
+names(obs)[names(obs) == 'Trips.obs'] <- 'Trips'
+names(basic)[names(basic) == 'adjusted.model'] <- 'model'
+names(obs)[names(obs) == 'observed'] <- 'model'
+
+basic.obs <- rbind.data.frame(basic, obs)
+basic.obs$model <- factor(basic.obs$model,
+                          levels = c("Observed", "Basic Model"))
+
+```
+
+```{r trips-vs-distance-population-plots}
+
+ggplot(subset(basic.obs, urban.trip.type!= "stay" & dist.fx == "pwr"), aes(distance, Trips, color = model))+
+     geom_point(alpha = 0.5, size = 1)+
+     scale_y_log10(labels=trans_format('log10',math_format(10^.x)),
+                   limits = c(1, 1E5),
+                   breaks = c(1E2, 1E4))+
+     scale_x_continuous(limits = c(0, 800),
+                        breaks = c(0, 500))+
+     labs(x = "Distance (km)", y = "Trip counts", color = "Trip estimate source" )+
+     scale_color_manual(values = c("black","red"))+
+     facet_wrap(~destination, ncol = 7)+ 
+     theme(plot.title = element_text(size = 18, hjust = 0.5),
+           panel.grid.major = element_blank(),
+           panel.grid.minor = element_blank(),
+           panel.background = element_blank(),
+           axis.line.x = element_line(color="black", size = .5),
+           axis.line.y = element_line(color="black", size = .5),
+           axis.text=element_text(size=9),
+           axis.title=element_text(size=9),
+           legend.text=element_text(size = 9),
+           legend.title = element_blank(),
+           legend.position = c(0.9, 0),
+           strip.text.x = element_text(size = 9),
+           strip.background = element_blank())
+
+ggplot(subset(basic.obs, urban.trip.type!= "stay" & dist.fx == "pwr"), aes(pop.start, Trips, color = model))+ 
+     geom_point(alpha = 0.5, size = 1)+
+     scale_y_log10(labels=trans_format('log10',math_format(10^.x)),
+                   limits = c(1, 1E5),
+                   breaks = c(1E2, 1E4))+
+     scale_x_log10(limits = c(5E4, 5E6),
+                   breaks = c(1e5, 1e6),
+                   labels=trans_format('log10',math_format(10^.x)))+
+     labs(x = "Origin population", y = "Trip counts", color = "Trip estimate source" )+
+     scale_color_manual(values = c("black","red"))+
+     facet_wrap(~destination, ncol = 7)+  
+     theme(plot.title = element_text(size = 18, hjust = 0.5),
+           panel.grid.major = element_blank(),
+           panel.grid.minor = element_blank(),
+           panel.background = element_blank(),
+           axis.line.x = element_line(color="black", size = .5),
+           axis.line.y = element_line(color="black", size = .5),
+           axis.text=element_text(size=9),
+           axis.title=element_text(size=9),
+           legend.text=element_text(size = 9),
+           legend.title = element_blank(),
+           legend.position = c(0.9, 0),
+           strip.text.x = element_text(size = 9),
+           strip.background = element_blank())
+```
+
+```{r ridgeplots}
+all.model.estimates$adjusted.model.complex <- factor(all.model.estimates$adjusted.model,
+                                                  levels = c("Radiation Model", "Basic Model", "Regional Model", "Urbanicity Model", "Regional-Urbanicity Model" ),
+                                                  labels = c("Radiation","Basic", "Regional", "Urbanicity", "Regional-Urbanicity"))
+
+col.model.values = brewer.pal(n = nlevels(all.model.estimates$adjusted.model.complex) +4, name = "Blues")
+col.model.assigned= c("Regional-Urbanicity" = col.model.values[8], "Urbanicity"= col.model.values[7], 
+                      "Regional" = col.model.values[6], "Basic"= col.model.values[3],"Radiation" = "#99d8c9")
+
+
+
+# Urb - reg ridge plots
+ggplot(subset(all.model.estimates, (dist.fx != "exp" | adjusted.model == "Radiation Model") & regional.urban.trip.type!= "stay"), aes(x = over.under.est.ratio, y = as.factor(adjusted.model.complex), fill = as.factor(adjusted.model.complex) ))+
+     geom_density_ridges(bandwidth = 0.2,
+                         quantile_lines = TRUE,
+                         size = 0.5,
+                         quantile_fun = function(x,...)median(x))+
+     labs(x = "Predicted : Observed", y = "Model")+
+     scale_x_log10(labels=trans_format('log10',math_format(10^.x)),
+                   breaks = c(1, 1E+4, 1E+8))+
+     scale_fill_manual(values = col.model.assigned)+
+     theme(panel.grid.major = element_blank(), 
+           panel.grid.minor = element_blank(),
+           panel.background = element_blank(), 
+           axis.line = element_line(colour = "black"),
+           axis.text=element_text(size=12),
+           axis.title=element_text(size=12,face="bold"),
+           legend.position = "none",
+           strip.background = element_blank(),
+           strip.text = element_text(size = 11))+
+     geom_vline(xintercept = c(1))+
+     geom_vline(xintercept = c(0.5, 2), linetype = "dashed")+
+     facet_grid(urban.trip.type~regional.trip.type)
+
+ggplot(subset(all.model.estimates, (dist.fx != "pwr" | adjusted.model == "Radiation Model") & regional.urban.trip.type!= "stay"), aes(x = over.under.est.ratio, y = as.factor(adjusted.model.complex), fill = as.factor(adjusted.model.complex) ))+
+     geom_density_ridges(bandwidth = 0.2,
+                         quantile_lines = TRUE,
+                         size = 0.5,
+                         quantile_fun = function(x,...)median(x))+
+     labs(x = "Predicted : Observed", y = "Model")+
+     scale_x_log10(labels=trans_format('log10',math_format(10^.x)),
+                   breaks = c(1, 1E+4, 1E+8))+
+     scale_fill_manual(values = col.model.assigned)+
+     theme(panel.grid.major = element_blank(), 
+           panel.grid.minor = element_blank(),
+           panel.background = element_blank(), 
+           axis.line = element_line(colour = "black"),
+           axis.text=element_text(size=12),
+           axis.title=element_text(size=12,face="bold"),
+           legend.position = "none",
+           strip.background = element_blank(),
+           strip.text = element_text(size = 11))+
+     geom_vline(xintercept = c(1))+
+     geom_vline(xintercept = c(0.5, 2), linetype = "dashed")+
+     facet_grid(urban.trip.type~regional.trip.type)
+
+# Urb  ridge plots
+ggplot(subset(all.model.estimates, (dist.fx != "exp" | adjusted.model == "Radiation Model") & urban.trip.type!= "stay"), aes(x = over.under.est.ratio, y = as.factor(adjusted.model.complex), fill = as.factor(adjusted.model.complex) ))+
+     geom_density_ridges(bandwidth = 0.2,
+                         quantile_lines = TRUE,
+                         size = 0.5,
+                         quantile_fun = function(x,...)median(x))+
+     labs(x = "Predicted : Observed", y = "Model")+
+     scale_x_log10(labels=trans_format('log10',math_format(10^.x)),
+                   breaks = c(1, 1E+4, 1E+8))+
+     scale_fill_manual(values = col.model.assigned)+
+     theme(panel.grid.major = element_blank(), 
+           panel.grid.minor = element_blank(),
+           panel.background = element_blank(), 
+           axis.line = element_line(colour = "black"),
+           axis.text=element_text(size=10),
+           axis.title=element_text(size=10,face="bold"),
+           legend.position = "none",
+           strip.background = element_blank(),
+           strip.text = element_text(size = 11))+
+     geom_vline(xintercept = c(1))+
+     geom_vline(xintercept = c(0.5, 2), linetype = "dashed")+
+     facet_wrap(~urban.trip.type, ncol = 1)
+
+ggplot(subset(all.model.estimates, (dist.fx != "pwr" | adjusted.model == "Radiation Model") & urban.trip.type!= "stay"), aes(x = over.under.est.ratio, y = as.factor(adjusted.model.complex), fill = as.factor(adjusted.model.complex) ))+
+     geom_density_ridges(bandwidth = 0.2,
+                         quantile_lines = TRUE,
+                         size = 0.5,
+                         quantile_fun = function(x,...)median(x))+
+     labs(x = "Predicted : Observed", y = "Model")+
+     scale_x_log10(labels=trans_format('log10',math_format(10^.x)),
+                   breaks = c(1, 1E+4, 1E+8))+
+     scale_fill_manual(values = col.model.assigned)+
+     theme(panel.grid.major = element_blank(), 
+           panel.grid.minor = element_blank(),
+           panel.background = element_blank(), 
+           axis.line = element_line(colour = "black"),
+           axis.text=element_text(size=10),
+           axis.title=element_text(size=10,face="bold"),
+           legend.position = "none",
+           strip.background = element_blank(),
+           strip.text = element_text(size = 11))+
+     geom_vline(xintercept = c(1))+
+     geom_vline(xintercept = c(0.5, 2), linetype = "dashed")+
+     facet_wrap(~urban.trip.type, ncol = 1)
+
+# Reg  ridge plots
+ggplot(subset(all.model.estimates, (dist.fx != "exp" | adjusted.model == "Radiation Model") & regional.trip.type!= "stay"), aes(x = over.under.est.ratio, y = as.factor(adjusted.model.complex), fill = as.factor(adjusted.model.complex) ))+
+     geom_density_ridges(bandwidth = 0.2,
+                         quantile_lines = TRUE,
+                         size = 0.5,
+                         quantile_fun = function(x,...)median(x))+
+     labs(x = "Predicted : Observed", y = "Model")+
+     scale_x_log10(labels=trans_format('log10',math_format(10^.x)),
+                   breaks = c(1, 1E+4, 1E+8))+
+     scale_fill_manual(values = col.model.assigned)+
+     theme(panel.grid.major = element_blank(), 
+           panel.grid.minor = element_blank(),
+           panel.background = element_blank(), 
+           axis.line = element_line(colour = "black"),
+           axis.text=element_text(size=12),
+           axis.title=element_text(size=12,face="bold"),
+           legend.position = "none",
+           strip.background = element_blank(),
+           strip.text = element_text(size = 11))+
+     geom_vline(xintercept = c(1))+
+     geom_vline(xintercept = c(0.5, 2), linetype = "dashed")+
+     facet_wrap(~regional.trip.type, ncol = 1)
+
+ggplot(subset(all.model.estimates, (dist.fx != "pwr" | adjusted.model == "Radiation Model") & regional.trip.type!= "stay"), aes(x = over.under.est.ratio, y = as.factor(adjusted.model.complex), fill = as.factor(adjusted.model.complex) ))+
+     geom_density_ridges(bandwidth = 0.2,
+                         quantile_lines = TRUE,
+                         size = 0.5,
+                         quantile_fun = function(x,...)median(x))+
+     labs(x = "Predicted : Observed", y = "Model")+
+     scale_x_log10(labels=trans_format('log10',math_format(10^.x)),
+                   breaks = c(1, 1E+4, 1E+8))+
+     scale_fill_manual(values = col.model.assigned)+
+     # scale_x_continuous(trans = "log10", limits = c(10, 1000))+
+     theme(panel.grid.major = element_blank(), 
+           panel.grid.minor = element_blank(),
+           panel.background = element_blank(), 
+           axis.line = element_line(colour = "black"),
+           axis.text=element_text(size=12),
+           axis.title=element_text(size=12,face="bold"),
+           legend.position = "none",
+           strip.background = element_blank(),
+           strip.text = element_text(size = 11))+
+     geom_vline(xintercept = c(1))+
+     geom_vline(xintercept = c(0.5, 2), linetype = "dashed")+
+     facet_wrap(~regional.trip.type, ncol = 1)
+
+
+```
+
